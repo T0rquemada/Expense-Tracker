@@ -5,8 +5,8 @@ Expense note format: **amount category**<br>
 If you want don't add category, enter only number, it will be saved in "No category".
 
 ## To run
-1. Create 'data.db' file
-2Run 'main.py'
+1. Create 'data.db' file <br>
+2. Run 'main.py'
 
 ## To load data from bank reports
 Put report file in supported format from shown banks in reports/ folder, and run program. <br>
