@@ -362,6 +362,3 @@ def main():
 
 
 main()
-
-# Statistics if expense/income null
-# load from report if reports not finded
