@@ -1,5 +1,7 @@
 import re
+import os
 import sqlite3
+import csv
 from datetime import datetime
 
 
@@ -8,6 +10,7 @@ def show__menu():
     print('2. Add income')
     print('3. Expense statistic')
     print('4. Income statistic')
+    print('5. Load notes from bank report')
 
 
 # Return true, if 'text' has not nums
@@ -22,8 +25,19 @@ def has_not_nums(text):
         return None
 
 
-def get_current_month():
-    current_data = datetime.now().month
+# If user input not number, starts infinity while loop
+def check_usr_input(user__input):
+    if has_not_nums(user__input):
+        while True:
+            user__input = input('Incorrect input, choose option: ')
+            if not has_not_nums(user__input):
+                break
+
+
+def get_current_month(current_data=0):
+    if current_data == 0:
+        current_data = datetime.now().month
+
     if current_data == 1:
         current_data = 'January'
     if current_data == 2:
@@ -81,8 +95,20 @@ def update_value(cur, category, expense_sum, table_name):
     cur.execute(f"UPDATE {table_name} SET amount = ? WHERE category = ?", (expense_sum, category,))
 
 
-def add_note(current_month, note_type, cursor):
-    table_name = f'{current_month}_{note_type}'
+def add_note(cursor, note_data, note_category, note_amount, note_type):
+    table_name = f'{note_data}_{note_type}'
+    create__table(cursor, table_name)
+
+    if is__category__exist(cursor, note_category, table_name):
+        old_value = get_amount_from_column(cursor, note_category, table_name)
+        new_value = old_value + note_amount
+        update_value(cursor, note_category, new_value, table_name)
+    else:
+        queue = f"INSERT INTO {table_name} (category, amount) VALUES (?, ?)"
+        cursor.execute(queue, (note_category, note_amount))
+
+
+def add_note_section(current_data, note_type, cursor):
     note = input(f'Enter {note_type} amount and category, divided by space: ')
 
     try:
@@ -98,15 +124,7 @@ def add_note(current_month, note_type, cursor):
         print('Error while catch user input for income:  ', error)
         return 1
 
-    create__table(cursor, table_name)
-
-    if is__category__exist(cursor, note_category, table_name):
-        old_value = get_amount_from_column(cursor, note_category, table_name)
-        new_value = old_value + note_amount
-        update_value(cursor, note_category, new_value, table_name)
-    else:
-        queue = f"INSERT INTO {table_name} (category, amount) VALUES (?, ?)"
-        cursor.execute(queue, (note_category, note_amount))
+    add_note(cursor, current_data, note_category, note_amount, note_type)
 
 
 # Return all month, depending on type (expense or income)
@@ -123,8 +141,7 @@ def get_all_month(table_type, cursor):
 def show_stat(table_type, cursor, stat_type):
     months = get_all_month(table_type, cursor)
 
-    # Show stat for month
-    if stat_type == 'month':
+    if stat_type == 'month':    # Show stat for month
         for month in months:
             print(month[:month.index('_')])
 
@@ -147,8 +164,7 @@ def show_stat(table_type, cursor, stat_type):
         print('\n')
         print('Total: ', total, 'UAH')
 
-    # Show stat for year
-    elif stat_type == 'year':
+    elif stat_type == 'year':   # Show stat for year
         years = []
 
         for month in months:
@@ -190,6 +206,8 @@ def statistics_section(note_type, cur):
     print(f'2. Year {note_type} statistic')
     usr_option = input('Choose option: ')
 
+    check_usr_input(usr_option)
+
     if usr_option == '1':
         show_stat(note_type, cur, 'month')
     elif usr_option == '2':
@@ -199,28 +217,139 @@ def statistics_section(note_type, cur):
         return 1
 
 
+def read_csv(file_name):
+    with open(file_name, 'r', newline='') as file:
+        reader = csv.reader(file)
+        next(reader)    # Skip first line in file
+
+        data = [[row[0][3:10], row[1], row[3]] for row in reader if float(row[3]) < 0]
+
+        return data
+
+
+def specify_category(input_category):
+    food = ['АТБ', 'ATB 113', 'VARUS', 'Moeselo', 'Сільпо']
+    coffee = ['Франс.уа', 'Bulochnik']
+    mails = ['Укрпошта']
+    healthcare = ['EVA']
+    shop = ['AliExpress', 'Списання AliExpress', 'Аврора', 'Avrora Multimarket', 'Ашан', 'UAPAY']
+    fast_food = ['Europa', 'FutKort', 'MAVRA PIZZA', 'McDonald’s']
+    gadgets = ['Vodafone', 'Comfy']
+
+    transfers_to_card = r'^\d{6}\*{4}\d{4}$'
+    ignored_categories = ['Округлення балансу']
+
+    if input_category in food:
+        return 'Food'
+    elif re.match(transfers_to_card, input_category):
+        return 'Transfers to card'
+    elif input_category in fast_food:
+        return 'Fast food'
+    elif input_category in gadgets or gadgets[0] in input_category:
+        return 'Gadgets'
+    elif input_category in coffee:
+        return 'Coffee'
+    elif input_category in healthcare:
+        return 'Healthcare'
+    elif input_category in shop:
+        return 'Shop'
+    elif input_category in mails:
+        return 'Mail'
+    elif input_category in ignored_categories or ignored_categories[0] in input_category:
+        return None
+    else:
+        return input_category
+
+
+def filter_csv_data(notes):
+    filtered_data = []
+    for row in notes:
+        data = get_current_month(int(row[0][:2])) + row[0][3:]
+        category = specify_category(row[1])
+        amount = float(row[2])
+        filtered_row = [data, category, abs(round(amount))]
+        if category is not None:
+            filtered_data.append(filtered_row)
+
+    return filtered_data
+
+
+# Return all files with defined extension
+def find_bank_reports(extension):
+    reports = []
+    for filename in os.listdir('reports/'):
+        if filename.endswith(extension):
+            reports.append(filename)
+
+    return reports
+
+
+def delete_reports(reports):
+    for report in reports:
+        try:
+            os.remove(os.path.join('reports/', report))
+        except Exception as e:
+            print(f"Error deleting file '{report}': {e}")
+
+
+# For monobank reports in .csv
+def load_from_csv(cursor, check_reports):
+    reports = find_bank_reports('.csv')
+
+    check_reports(reports)
+
+    try:
+        for report in reports:
+            data = read_csv("reports/" + report)
+            filtered_data = filter_csv_data(data)
+
+            for note in filtered_data:
+                add_note(cursor, *note, 'expense')
+
+        delete_reports(reports)
+    except Exception as e:
+        print('Something get wrong with load data from .csv: ', e)
+        return 1
+
+
+def load_section(cursor):
+    def check_reports(reports):
+        if not reports:
+            print("No bank reports founded")
+            return 1
+
+    print('1. Monobank (.csv)')
+
+    usr_choice = input('Enter your choice: ')
+    check_usr_input(usr_choice)
+
+    if usr_choice == '1':
+        load_from_csv(cursor, check_reports)
+    else:
+        print('Incorrect input')
+        return 1
+
+
 def main():
     show__menu()
     user__input = input('Choose option (contain only number): ')
 
-    if has_not_nums(user__input):
-        while True:
-            user__input = input('Incorrect input, choose option: ')
-            if not has_not_nums(user__input):
-                break
+    check_usr_input(user__input)
 
-    current_month = get_current_month() + str(datetime.now().year)  # Defining current month with year
+    current_data = get_current_month() + str(datetime.now().year)  # Defining current month with year
     connection = sqlite3.connect('data.db')
     cursor = connection.cursor()
 
     if user__input == '1':  # Add expense
-        add_note(current_month, 'expense', cursor)
+        add_note_section(current_data, 'expense', cursor)
     elif user__input == '2':    # Add income
-        add_note(current_month, 'income', cursor)
+        add_note_section(current_data, 'income', cursor)
     elif user__input == '3':    # Expense statistic
         statistics_section('expense', cursor)
     elif user__input == '4':    # Income statistic
         statistics_section('income', cursor)
+    elif user__input == '5':    # Load data from reports
+        load_section(cursor)
     else:
         print('Incorrect input')
         return 1
@@ -233,3 +362,6 @@ def main():
 
 
 main()
+
+# Statistics if expense/income null
+# load from report if reports not finded
